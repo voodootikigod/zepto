@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Zepto Ajax unit tests</title>
+  <script src="../src/polyfill.js"></script>
   <script src="../src/zepto.js"></script>
   <script src="../src/ajax.js"></script>
   <script src="../vendor/evidence.js"></script>
@@ -36,14 +37,16 @@
         });
       },
 
-      testAjaxPostWithData: function(t) {
-        t.pause();
-        $.post('fixtures/ajax_load_simple.html', { sample: 'data' }, function(response) {
-          t.resume(function() {
-            this.assert(response);
-          });
-        });
-      },
+      // TODO: It's time to integrate a real webserver (webrick) to test POSTS
+      //
+      //testAjaxPostWithData: function(t) {
+      //  t.pause();
+      //  $.post('fixtures/ajax_post_json_echo.php', { sample: 'data', letters: ['a', 'b', 'c'] }, function(response) {
+      //    t.resume(function() {
+      //      this.assertEqual(response, '{"sample":"data","letters":["a","b","c"]}');
+      //    });
+      //  });
+      //},
 
       testAjaxPostWithAcceptType: function(t) {
         t.pause();
@@ -59,6 +62,15 @@
         $.getJSON('zepto.json', function(data){
           t.resume(function(){
             this.assertEqual('awesomeness', data.zepto);
+          });
+        });
+      },
+
+      testAjaxGetJSONP: function(t){
+        t.pause();
+        $.getJSON('fixtures/jsonp.js?jsoncallback=?&timestamp='+(+new Date), function(data){
+          t.resume(function(){
+            this.assertEqual(data.items.length, 0);
           });
         });
       },
@@ -108,6 +120,9 @@
       },
       send: function(data) {
         this.data = data;
+      },
+      abort: function() {
+        this.aborted = true;
       },
       ready: function(readyState, status, responseText) {
         this.readyState = readyState;
@@ -159,6 +174,20 @@
         t.assert(MockXHR.last.headers.some(matchHeader('Content-Type', 'text/html')));
       },
 
+      testContentTypeDefaultsToUrlEncoded: function(t) {
+        $.ajax({ type: 'POST', data: [] });
+        t.assert(MockXHR.last.headers.some(matchHeader('Content-Type', 'application/x-www-form-urlencoded')));
+
+        $.ajax({ type: 'POST', data: [], contentType: 'application/x-foo' });
+        t.assert(MockXHR.last.headers.some(matchHeader('Content-Type', 'application/x-foo')));
+      },
+
+      testCustomHeader: function(t) {
+        $.ajax({ headers: {'X-Awesome': 'true'} });
+        t.assert(MockXHR.last.headers.some(matchHeader('X-Requested-With', 'XMLHttpRequest')));
+        t.assert(MockXHR.last.headers.some(matchHeader('X-Awesome', 'true')));
+      },
+
       testJSONResponseBodiesAreParsedWhenDataTypeOptionIsJSON: function(t) {
         var result = {};
         $.ajax({ dataType: 'json', success: function(json) {result = json } });
@@ -166,10 +195,140 @@
         t.assertEqual("world", result.hello);
       },
 
-      testDataOptionIsConvertedToJSONString: function(t) {
-        $.ajax({ data: {hello: 'world'} });
-        t.assertEqual('{"hello":"world"}', MockXHR.last.data);
+      testDataOptionIsConvertedToSerializedForm: function(t) {
+        $.ajax({ data: {hello: 'world', array: [1,2,3], object: { prop1: 'val', prop2: 2 } } });
+		MockXHR.last.data = decodeURIComponent(MockXHR.last.data);
+        t.assertEqual('hello=world&array[]=1&array[]=2&array[]=3&object[prop1]=val&object[prop2]=2', MockXHR.last.data);
+      },
+
+      testErrorCallback: function(t) {
+        var successFired = false, xhr, status;
+        $.ajax({
+          success: function() { successFired = true },
+          error: function(x, s) { xhr = x, status = s }
+        });
+
+        MockXHR.last.ready(4, 500, '500 Internal Server Error');
+        t.assert(!successFired);
+        t.assertEqual(MockXHR.last, xhr);
+        t.assertEqual('error', status);
+      },
+
+      testErrorCallbackWithInvalidJSON: function(t) {
+        var successFired = false, xhr, status, exception;
+        $.ajax({
+          dataType: 'json',
+          succes: function() { successFired = true },
+          error: function(x, s, e) { xhr = x, status = s, exception = e }
+        });
+
+        MockXHR.last.ready(4, 200, '{invalid');
+        t.assert(!successFired);
+        t.assertEqual(MockXHR.last, xhr);
+        t.assertEqual('parsererror', status);
+        t.assert(exception.toString().match(/SyntaxError/));
+      },
+
+      test201ResponseIsSuccess: function(t) {
+        var successFired, errorFired;
+        $.ajax({
+          success: function() { successFired = true },
+          error: function() { errorFired = true }
+        });
+
+        MockXHR.last.ready(4, 201, 'Created');
+        t.assert(successFired);
+        t.refute(errorFired);
+      },
+
+      testXHRParameterInSuccessCallback: function(t) {
+        var body, status, xhr;
+        $.ajax({
+          success: function(b, s, x) { body = b, status = s, xhr = x }
+        });
+
+        MockXHR.last.ready(4, 200, 'Hello');
+        t.assertEqual('Hello', body);
+        t.assertEqual('success', status);
+        t.assertEqual(MockXHR.last, xhr);
+
+        body = status = xhr = null;
+        $.ajax({
+          dataType: 'json',
+          success: function(b, s, x) { body = b, status = s, xhr = x }
+        });
+
+        MockXHR.last.ready(4, 200, '{"message":"Hello"}');
+        t.assertEqual('Hello', body.message);
+        t.assertEqual('success', status);
+        t.assertEqual(MockXHR.last, xhr);
+      },
+
+      testBeforeSendCallback: function(t) {
+        var xhr, beforeFired = false, settings = {};
+        $.ajax({
+          data: "1=2",
+          beforeSend: function(x, s) {
+            beforeFired = true, settings = s, xhr = x;
+          }
+        });
+
+        t.assert(beforeFired);
+        t.assertEqual(MockXHR.last, xhr);
+        t.assertEqual("1=2", settings.data);
+      },
+
+      testBeforeSendAbort: function(t) {
+        var xhr;
+        $.ajax({ beforeSend: function(x) { xhr = x; return false } });
+
+        t.assert(xhr.aborted);
+      },
+
+      testCompleteCallback: function(t) {
+        var status, xhr;
+        $.ajax({ complete: function(x, s) { status = s, xhr = x } });
+
+        MockXHR.last.ready(4, 200, 'OK');
+        t.assertEqual(MockXHR.last, xhr);
+        t.assertEqual('success', status);
+      },
+
+      testCallbackOrder: function(t) {
+        var order = [];
+        $.ajax({
+          beforeSend: function() { order.push('beforeSend') },
+          success: function() { order.push('success') },
+          complete: function() { order.push('complete') }
+        });
+
+        MockXHR.last.ready(4, 200, 'OK');
+        t.assertEqual('beforeSend,success,complete', order.join(','));
       }
+    });
+  </script>
+
+  <script>
+    Evidence.TestCase.extend('ZeptoAjaxHelperMethodsTest',{
+
+      testParamMethod: function(t) {
+        result = $.param({ libs: ['jQuery', 'script.aculo.us', 'Prototype', 'Dojo'] });
+        result = decodeURIComponent(result);
+        t.assertEqual(result, "libs[]=jQuery&libs[]=script.aculo.us&libs[]=Prototype&libs[]=Dojo");
+
+        result = $.param({ jquery: 'Javascript', rails: 'Ruby', django: 'Python' });
+        result = decodeURIComponent(result);
+        t.assertEqual(result, "jquery=Javascript&rails=Ruby&django=Python");
+
+        result = $.param({
+          title: "Some Countries",
+          list: ['Ecuador', 'Austria', 'England'],
+          capitals: { ecuador: 'Quito', austria: 'Vienna', GB: { england: 'London', scotland: 'Edinburgh'} }
+        });
+        result = decodeURIComponent(result);
+        t.assertEqual(result, "title=Some+Countries&list[]=Ecuador&list[]=Austria&list[]=England&capitals[ecuador]=Quito&capitals[austria]=Vienna&capitals[GB][england]=London&capitals[GB][scotland]=Edinburgh");
+      }
+
     });
   </script>
 </body>

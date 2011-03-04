@@ -1,46 +1,115 @@
 (function($){
-  var d=document, $$=$.qsa, handlers=[];
-  function find(el, ev, fn) {
-    return handlers.filter(function(handler){
-      return handler && handler.el===el && (!ev || handler.ev===ev) && (!fn || handler.fn===fn);
+  var $$ = $.qsa, handlers = {}, _zid = 1;
+  function zid(element) {
+    return element._zid || (element._zid = _zid++);
+  }
+  function findHandlers(element, event, fn, selector) {
+    event = parse(event);
+    if (event.ns) var matcher = matcherFor(event.ns);
+    return (handlers[zid(element)] || []).filter(function(handler) {
+      return handler
+        && (!event.e  || handler.e == event.e)
+        && (!event.ns || matcher.test(handler.ns))
+        && (!fn       || handler.fn == fn)
+        && (!selector || handler.sel == selector);
     });
   }
+  function parse(event) {
+    var parts = ('' + event).split('.');
+    return {e: parts[0], ns: parts.slice(1).sort().join(' ')};
+  }
+  function matcherFor(ns) {
+    return new RegExp('(?:^| )' + ns.replace(' ', ' .* ?') + '(?: |$)');
+  }
+
+  function add(element, events, fn, selector, delegate){
+    var id = zid(element), set = (handlers[id] || (handlers[id] = []));
+    events.split(/\s/).forEach(function(event){
+      var handler = $.extend(parse(event), {fn: fn, sel: selector, del: delegate, i: set.length});
+      set.push(handler);
+      element.addEventListener(handler.e, delegate || fn, false);
+    });
+  }
+  function remove(element, events, fn, selector){
+    var id = zid(element);
+    (events || '').split(/\s/).forEach(function(event){
+      findHandlers(element, event, fn, selector).forEach(function(handler){
+        delete handlers[id][handler.i];
+        element.removeEventListener(handler.e, handler.del || handler.fn, false);
+      });
+    });
+  }
+
   $.event = {
-    add: function(el, events, fn){
-      events.split(/\s/).forEach(function(ev){
-        var handler = {ev: ev, el: el, fn: fn, i: handlers.length};
-        handlers.push(handler);
-        el.addEventListener(ev, fn, false);
-      });
+    add: function(element, events, fn){
+      add(element, events, fn);
     },
-    remove: function(el, events, fn){
-      (events||'').split(/\s/).forEach(function(ev){
-        find(el, ev, fn).forEach(function(handler){
-          handlers[handler.i] = null;
-          el.removeEventListener(handler.ev, handler.fn, false);
-        });
-      });
+    remove: function(element, events, fn){
+      remove(element, events, fn);
     }
   };
+
   $.fn.bind = function(event, callback){
-    return this.each(function(el){ $.event.add(el, event, callback) });
-  };
-  $.fn.unbind = function(event, callback){
-    return this.each(function(el){ $.event.remove(el, event, callback) });
-  };
-  $.fn.delegate = function(selector, event, callback){
-    return this.each(function(el){
-      $.event.add(el, event, function(event){
-        var target = event.target, nodes = $$(el, selector);
-        while(target && nodes.indexOf(target)<0) target = target.parentNode;
-        if(target && !(target===el) && !(target===d)) callback.call(target, event);
-      }, false);
+    return this.each(function(){
+      add(this, event, callback);
     });
   };
-  $.fn.live = function(event, callback){
-    $(d.body).delegate(this.selector, event, callback); return this;
+  $.fn.unbind = function(event, callback){
+    return this.each(function(){
+      remove(this, event, callback);
+    });
   };
+  $.fn.one = function(event, callback){
+    return this.each(function(){
+      var self = this;
+      add(this, event, function wrapper(){
+        callback();
+        remove(self, event, arguments.callee);
+      });
+    });
+  };
+
+  var eventMethods = ['preventDefault', 'stopImmediatePropagation', 'stopPropagation'];
+  function createProxy(event) {
+    var proxy = $.extend({originalEvent: event}, event);
+    eventMethods.forEach(function(key) {
+      proxy[key] = function() {return event[key].apply(event, arguments)};
+    });
+    return proxy;
+  }
+
+  $.fn.delegate = function(selector, event, callback){
+    return this.each(function(i, element){
+      add(element, event, callback, selector, function(e){
+        var target = e.target, nodes = $$(element, selector);
+        while (target && nodes.indexOf(target) < 0) target = target.parentNode;
+        if (target && !(target === element) && !(target === document)) {
+          callback.call(target, $.extend(createProxy(e), {
+            currentTarget: target, liveFired: element
+          }));
+        }
+      });
+    });
+  };
+  $.fn.undelegate = function(selector, event, callback){
+    return this.each(function(){
+      remove(this, event, callback, selector);
+    });
+  }
+
+  $.fn.live = function(event, callback){
+    $(document.body).delegate(this.selector, event, callback);
+    return this;
+  };
+  $.fn.die = function(event, callback){
+    $(document.body).undelegate(this.selector, event, callback);
+    return this;
+  };
+
   $.fn.trigger = function(event){
-    return this.each(function(el){ var e; el.dispatchEvent(e = d.createEvent('Events'), e.initEvent(event, true, false)) });
+    return this.each(function(){
+      var e = document.createEvent('Events');
+      this.dispatchEvent(e, e.initEvent(event, true, true));
+    });
   };
 })(Zepto);

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Zepto touch functional test</title>
   <meta name="viewport" content="maximum-scale=1,initial-scale=1,user-scalable=0">
+  <script src="../src/polyfill.js"></script>
   <script src="../src/zepto.js"></script>
   <script src="../src/event.js"></script>
   <script src="../src/touch.js"></script>
@@ -25,6 +26,12 @@
       })
       .swipe(function(){
         $(this).append(' | swipe!');
+      })
+      .swipeLeft(function(){
+        $(this).append(' | swipe left!');
+      })
+      .swipeRight(function(){
+        $(this).append(' | swipe right!');
       });
   </script>
 </body>

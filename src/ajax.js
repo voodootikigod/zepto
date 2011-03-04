@@ -1,34 +1,75 @@
 (function($){
+  var jsonpID = 0;
+
+  function empty() {}
+
+  $.ajaxJSONP = function(options){
+    var jsonpString = 'jsonp' + ++jsonpID,
+        script = document.createElement('script');
+    window[jsonpString] = function(data){
+      options.success(data);
+      delete window.jsonpString;
+    };
+    script.src = options.url.replace(/=\?/, '=' + jsonpString);
+    $('head').append(script);
+  };
+
+  $.ajaxSettings = {
+    type: 'GET',
+    beforeSend: empty, success: empty, error: empty, complete: empty,
+    accepts: {
+      script: 'text/javascript, application/javascript',
+      json:   'application/json',
+      xml:    'application/xml, text/xml',
+      html:   'text/html',
+      text:   'text/plain'
+    }
+  };
+
   $.ajax = function(options){
-    // { type, url, data, success, dataType, contentType }
     options = options || {};
-    var data = options.data,
-        cb = options.success,
-        mime = mimeTypes[options.dataType],
-        content = options.contentType,
+    var settings = $.extend({}, options);
+    for (key in $.ajaxSettings) if (!settings[key]) settings[key] = $.ajaxSettings[key];
+
+    if (/=\?/.test(settings.url)) return $.ajaxJSONP(settings);
+
+    if (!settings.url) settings.url = window.location.toString();
+    if (settings.data && !settings.contentType) settings.contentType = "application/x-www-form-urlencoded";
+
+    var mime = settings.accepts[settings.dataType],
         xhr = new XMLHttpRequest();
 
-    if (cb instanceof Function) {
-      xhr.onreadystatechange = function(){
-        if(xhr.readyState==4 && (xhr.status==200 || xhr.status==0)) {
-          if (mime == 'application/json') cb(JSON.parse(xhr.responseText));
-          else cb(xhr.responseText);
-        }
-      };
-    }
+    settings.headers = $.extend({'X-Requested-With': 'XMLHttpRequest'}, settings.headers || {});
+    if (mime) settings.headers['Accept'] = mime;
 
-    xhr.open(options.type || 'GET', options.url || window.location, true);
-    if (mime) xhr.setRequestHeader('Accept', mime);
-    if (data instanceof Object) data = JSON.stringify(data), content = content || 'application/json';
-    if (content) xhr.setRequestHeader('Content-Type', content);
-    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-    xhr.send(data);
-  };
-  var mimeTypes = $.ajax.mimeTypes = {
-    json: 'application/json',
-    xml:  'application/xml',
-    html: 'text/html',
-    text: 'text/plain'
+    xhr.onreadystatechange = function(){
+      if (xhr.readyState == 4) {
+        var result, error = false;
+        if ((xhr.status >= 200 && xhr.status < 300) || xhr.status == 0) {
+          if (mime == 'application/json') {
+            try { result = JSON.parse(xhr.responseText); }
+            catch (e) { error = e; }
+          }
+          else result = xhr.responseText;
+          if (error) settings.error(xhr, 'parsererror', error);
+          else settings.success(result, 'success', xhr);
+        } else {
+          error = true;
+          settings.error(xhr, 'error');
+        }
+        settings.complete(xhr, error ? 'error' : 'success');
+      }
+    };
+
+    xhr.open(settings.type, settings.url, true);
+    if (settings.beforeSend(xhr, settings) === false) {
+      xhr.abort();
+      return false;
+    }
+    if (settings.data instanceof Object) settings.data = $.param(settings.data);
+    if (settings.contentType) settings.headers['Content-Type'] = settings.contentType;
+    for (name in settings.headers) xhr.setRequestHeader(name, settings.headers[name]);
+    xhr.send(settings.data);
   };
 
   $.get = function(url, success){ $.ajax({ url: url, success: success }) };
@@ -39,9 +80,9 @@
   $.getJSON = function(url, success){ $.ajax({ url: url, success: success, dataType: 'json' }) };
 
   $.fn.load = function(url, success){
+    if (!this.length) return this;
     var self = this, parts = url.split(/\s/), selector;
-    if(!this.dom.length) return this;
-    if(parts.length>1) url = parts[0], selector = parts[1];
+    if (parts.length > 1) url = parts[0], selector = parts[1];
     $.get(url, function(response){
       self.html(selector ?
         $(document.createElement('div')).html(response).find(selector).html()
@@ -49,5 +90,21 @@
       success && success();
     });
     return this;
+  };
+
+  $.param = function(obj, v){
+    var s = [],
+        rec = '',
+        add = function(key, value){
+          if(v) s[s.length] = encodeURIComponent(v + "[" + key +"]") + '=' + encodeURIComponent(value);
+          else s[s.length] = encodeURIComponent(key) + '=' + encodeURIComponent(value);
+        };
+    for(var i in obj){
+      if(obj[i] instanceof Array || obj[i] instanceof Object)
+        rec += (s.length + rec.length > 0 ? '&' : '') + $.param(obj[i], (v ? v + "[" + i + "]" : i));
+      else
+        add(obj instanceof Array ? '' : i, obj[i]);
+    };
+    return s.join("&").replace(/%20/g, "+") + rec;
   };
 })(Zepto);

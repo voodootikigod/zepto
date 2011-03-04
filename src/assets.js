@@ -2,14 +2,14 @@
   var cache = [], timeout;
 
   $.fn.remove = function(){
-    return this.each(function(el){
-      if(el.tagName=='IMG'){
-        cache.push(el);
-        el.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-        if(timeout) clearTimeout(timeout);
+    return this.each(function(){
+      if(this.tagName == 'IMG'){
+        cache.push(this);
+        this.src = 'data:image/gif;base64,R0lGODlhAQABAAAAADs=';
+        if (timeout) clearTimeout(timeout);
         timeout = setTimeout(function(){ cache = [] }, 60000);
       }
-      el.parentNode.removeChild(el);
+      this.parentNode.removeChild(this);
     });
   }
 })(Zepto);

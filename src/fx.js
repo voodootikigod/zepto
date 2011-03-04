@@ -1,8 +1,16 @@
 (function($){
-  $.fn.anim = function(props, dur, ease){
-    var transforms = [], opacity, k;
-    for (k in props) k === 'opacity' ? opacity=props[k] : transforms.push(k+'('+props[k]+')');
-    return this.css({ '-webkit-transition': 'all '+(dur||0.5)+'s '+(ease||''),
-      '-webkit-transform': transforms.join(' '), opacity: opacity });
+  $.fn.anim = function(properties, duration, ease, callback){
+    var transforms = [], opacity, key;
+    for (key in properties)
+      if (key === 'opacity') opacity = properties[key];
+      else transforms.push(key + '(' + properties[key] + ')');
+
+    typeof callback == 'function' && this.one('webkitTransitionEnd', callback);
+
+    return this.css({
+      '-webkit-transition': 'all ' + (duration !== undefined ? duration : 0.5) + 's ' + (ease || ''),
+      '-webkit-transform': transforms.join(' '),
+      opacity: opacity
+    });
   }
 })(Zepto);
